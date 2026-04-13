@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     POSTGRES_USER: str = "ducklake"
     POSTGRES_PASSWORD: str = "ducklake"
     POSTGRES_PORT: int = 5432
+    POSTGRES_HOST: str = ""
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
