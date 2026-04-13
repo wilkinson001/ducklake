@@ -1,2 +1,4 @@
 .env
 .venv
+cdc-lambda/target/
+docs/
