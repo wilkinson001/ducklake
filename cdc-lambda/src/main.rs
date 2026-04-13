@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use duckdb::Connection;
 use lambda_runtime::{service_fn, LambdaEvent};
 use serde::Deserialize;
@@ -16,6 +14,7 @@ struct Config {
     minio_access_key: String,
     minio_secret_key: String,
     minio_bucket: String,
+    table_name: String,
 }
 
 async fn process_cdc() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -34,25 +33,23 @@ async fn process_cdc() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
     });
 
-    let checkpoint_rows = pg_client
-        .query("SELECT table_name, snapshot_id FROM checkpoints", &[])
+    let table_name = &config.table_name;
+    let checkpoint_row = pg_client
+        .query_opt(
+            "SELECT snapshot_id FROM checkpoints WHERE table_name = $1",
+            &[table_name],
+        )
         .await?;
 
-    let checkpoints: HashMap<String, i64> = checkpoint_rows
-        .iter()
-        .map(|row| {
-            let name: String = row.get(0);
-            let snap: i64 = row.get(1);
-            (name, snap)
-        })
-        .collect();
+    let last_snapshot: i64 = match checkpoint_row {
+        Some(row) => row.get(0),
+        None => {
+            println!("[{table_name}] No checkpoint found — nothing to track");
+            return Ok(());
+        }
+    };
 
-    if checkpoints.is_empty() {
-        println!("No checkpoints found — nothing to track");
-        return Ok(());
-    }
-
-    println!("Loaded {} checkpoint(s)", checkpoints.len());
+    println!("[{table_name}] Checkpoint at snapshot {last_snapshot}");
 
     // Set up DuckDB with DuckLake
     let db = Connection::open_in_memory()?;
@@ -93,49 +90,45 @@ async fn process_cdc() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     println!("Latest DuckLake snapshot: {latest_snapshot}");
 
-    // Check each tracked table for changes
-    for (table_name, last_snapshot) in &checkpoints {
-        if !has_new_snapshots(latest_snapshot, *last_snapshot) {
-            println!("[{table_name}] No new snapshots (at {last_snapshot})");
-            continue;
-        }
-
-        println!(
-            "[{table_name}] New changes: snapshot {last_snapshot} -> {latest_snapshot}"
-        );
-
-        let query = format!(
-            "SELECT * FROM ducklake_table_changes('my_lake', '{table_name}', {last_snapshot}, {latest_snapshot})"
-        );
-        let mut stmt = db.prepare(&query)?;
-        let column_names: Vec<String> = stmt.column_names();
-        let column_count = column_names.len();
-
-        let rows = stmt.query_map([], |row| {
-            let values: Vec<String> = (0..column_count)
-                .map(|i| {
-                    row.get::<_, String>(i)
-                        .unwrap_or_else(|_| "NULL".to_string())
-                })
-                .collect();
-            Ok(values)
-        })?;
-
-        for row_result in rows {
-            let values = row_result?;
-            println!("  {}", format_change_row(&column_names, &values));
-        }
-
-        // Update checkpoint
-        pg_client
-            .execute(
-                "UPDATE checkpoints SET snapshot_id = $1 WHERE table_name = $2",
-                &[&latest_snapshot, table_name],
-            )
-            .await?;
-
-        println!("[{table_name}] Checkpoint updated to {latest_snapshot}");
+    // Check for new changes
+    if !has_new_snapshots(latest_snapshot, last_snapshot) {
+        println!("[{table_name}] No new snapshots (at {last_snapshot})");
+        return Ok(());
     }
+
+    println!("[{table_name}] New changes: snapshot {last_snapshot} -> {latest_snapshot}");
+
+    let query = format!(
+        "SELECT * FROM ducklake_table_changes('my_lake', '{table_name}', {last_snapshot}, {latest_snapshot})"
+    );
+    let mut stmt = db.prepare(&query)?;
+    let column_names: Vec<String> = stmt.column_names();
+    let column_count = column_names.len();
+
+    let rows = stmt.query_map([], |row| {
+        let values: Vec<String> = (0..column_count)
+            .map(|i| {
+                row.get::<_, String>(i)
+                    .unwrap_or_else(|_| "NULL".to_string())
+            })
+            .collect();
+        Ok(values)
+    })?;
+
+    for row_result in rows {
+        let values = row_result?;
+        println!("  {}", format_change_row(&column_names, &values));
+    }
+
+    // Update checkpoint
+    pg_client
+        .execute(
+            "UPDATE checkpoints SET snapshot_id = $1 WHERE table_name = $2",
+            &[&latest_snapshot, table_name],
+        )
+        .await?;
+
+    println!("[{table_name}] Checkpoint updated to {latest_snapshot}");
 
     Ok(())
 }
@@ -230,6 +223,7 @@ mod tests {
             ("MINIO_ACCESS_KEY".to_string(), "key".to_string()),
             ("MINIO_SECRET_KEY".to_string(), "secret".to_string()),
             ("MINIO_BUCKET".to_string(), "bucket".to_string()),
+            ("TABLE_NAME".to_string(), "orders".to_string()),
         ];
 
         let config: Config = envy::from_iter(vars).unwrap();
@@ -242,6 +236,7 @@ mod tests {
         assert_eq!(config.minio_access_key, "key");
         assert_eq!(config.minio_secret_key, "secret");
         assert_eq!(config.minio_bucket, "bucket");
+        assert_eq!(config.table_name, "orders");
     }
 
     #[test]
@@ -256,6 +251,7 @@ mod tests {
             ("MINIO_ACCESS_KEY".to_string(), "key".to_string()),
             ("MINIO_SECRET_KEY".to_string(), "secret".to_string()),
             ("MINIO_BUCKET".to_string(), "bucket".to_string()),
+            ("TABLE_NAME".to_string(), "orders".to_string()),
         ];
 
         let result = envy::from_iter::<_, Config>(vars);
