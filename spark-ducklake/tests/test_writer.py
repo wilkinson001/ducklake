@@ -21,47 +21,50 @@ CONFIG = DuckLakeConfig(
 )
 
 
-class TestDuckLakeWriter:
-    def test_is_picklable(self):
-        w = DuckLakeWriter(CONFIG, "test_table", SCHEMA)
-        restored = pickle.loads(pickle.dumps(w))
-        assert restored.table == "test_table"
-        assert restored.write_mode == "append"
-
-    def test_merge_mode_is_picklable(self):
-        w = DuckLakeWriter(CONFIG, "test_table", SCHEMA, "merge", "id")
-        restored = pickle.loads(pickle.dumps(w))
-        assert restored.write_mode == "merge"
-        assert restored.merge_keys == "id"
+def test_writer_is_picklable():
+    w = DuckLakeWriter(CONFIG, "test_table", SCHEMA)
+    restored = pickle.loads(pickle.dumps(w))
+    assert restored.table == "test_table"
+    assert restored.write_mode == "append"
 
 
-class TestDuckLakeStreamWriter:
-    def test_is_picklable(self):
-        w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "append", "", False)
-        restored = pickle.loads(pickle.dumps(w))
-        assert restored.table == "test_table"
-        assert restored.write_mode == "append"
-        assert restored.overwrite is False
+def test_writer_merge_mode_is_picklable():
+    w = DuckLakeWriter(CONFIG, "test_table", SCHEMA, "merge", "id")
+    restored = pickle.loads(pickle.dumps(w))
+    assert restored.write_mode == "merge"
+    assert restored.merge_keys == "id"
 
-    def test_merge_mode_is_picklable(self):
-        w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "merge", "id,tenant_id", False)
-        restored = pickle.loads(pickle.dumps(w))
-        assert restored.write_mode == "merge"
-        assert restored.merge_keys == "id,tenant_id"
 
-    def test_overwrite_mode_is_picklable(self):
-        w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "append", "", True)
-        restored = pickle.loads(pickle.dumps(w))
-        assert restored.overwrite is True
+def test_stream_writer_is_picklable():
+    w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "append", "", False)
+    restored = pickle.loads(pickle.dumps(w))
+    assert restored.table == "test_table"
+    assert restored.write_mode == "append"
+    assert restored.overwrite is False
 
-    def test_abort_logs_warning(self, caplog):
-        w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "append", "", False)
-        with caplog.at_level(logging.WARNING):
-            w.abort([], 42)
-        assert "batch 42" in caplog.text
 
-    def test_batch_writer_abort_logs_warning(self, caplog):
-        w = DuckLakeWriter(CONFIG, "test_table", SCHEMA)
-        with caplog.at_level(logging.WARNING):
-            w.abort([])
-        assert "DuckLakeWriter.abort" in caplog.text
+def test_stream_writer_merge_mode_is_picklable():
+    w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "merge", "id,tenant_id", False)
+    restored = pickle.loads(pickle.dumps(w))
+    assert restored.write_mode == "merge"
+    assert restored.merge_keys == "id,tenant_id"
+
+
+def test_stream_writer_overwrite_mode_is_picklable():
+    w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "append", "", True)
+    restored = pickle.loads(pickle.dumps(w))
+    assert restored.overwrite is True
+
+
+def test_stream_writer_abort_logs_warning(caplog):
+    w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "append", "", False)
+    with caplog.at_level(logging.WARNING):
+        w.abort([], 42)
+    assert "batch 42" in caplog.text
+
+
+def test_batch_writer_abort_logs_warning(caplog):
+    w = DuckLakeWriter(CONFIG, "test_table", SCHEMA)
+    with caplog.at_level(logging.WARNING):
+        w.abort([])
+    assert "DuckLakeWriter.abort" in caplog.text

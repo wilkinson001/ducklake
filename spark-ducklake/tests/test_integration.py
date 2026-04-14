@@ -68,105 +68,161 @@ def _write_df(df, extra_opts=None, mode="append"):
     writer.save()
 
 
-class TestBatchRead:
-    def test_reads_all_rows(self, spark):
-        df = _read_df(spark)
-        rows = df.orderBy("id").collect()
-        assert len(rows) == 2
-        assert rows[0]["id"] == 1
-        assert rows[0]["name"] == "alice"
-        assert rows[1]["id"] == 2
-        assert rows[1]["name"] == "bob"
-
-    def test_schema_inference(self, spark):
-        df = _read_df(spark)
-        field_names = [f.name for f in df.schema.fields]
-        assert "id" in field_names
-        assert "name" in field_names
+# Batch read
 
 
-class TestBatchWrite:
-    def test_append_inserts_new_rows(self, spark):
-        new_data = spark.createDataFrame([(3, "charlie"), (4, "diana")], ["id", "name"])
-        _write_df(new_data)
-
-        df = _read_df(spark)
-        assert df.count() == 4
-
-    def test_append_preserves_existing_rows(self, spark):
-        new_data = spark.createDataFrame([(3, "charlie")], ["id", "name"])
-        _write_df(new_data)
-
-        rows = _read_df(spark).orderBy("id").collect()
-        assert rows[0]["name"] == "alice"
-        assert rows[1]["name"] == "bob"
-        assert rows[2]["name"] == "charlie"
+def test_reads_all_rows(spark):
+    df = _read_df(spark)
+    rows = df.orderBy("id").collect()
+    assert len(rows) == 2
+    assert rows[0]["id"] == 1
+    assert rows[0]["name"] == "alice"
+    assert rows[1]["id"] == 2
+    assert rows[1]["name"] == "bob"
 
 
-class TestBatchMerge:
-    def test_merge_updates_existing_row(self, spark):
-        merge_data = spark.createDataFrame(
-            [(1, "alice_updated")], ["id", "name"]
-        ).coalesce(1)
-        _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
-
-        rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
-        assert rows[1] == "alice_updated"
-        assert rows[2] == "bob"
-
-    def test_merge_inserts_new_row(self, spark):
-        merge_data = spark.createDataFrame(
-            [(5, "eve")], ["id", "name"]
-        ).coalesce(1)
-        _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
-
-        rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
-        assert rows[5] == "eve"
-        assert len(rows) == 3
-
-    def test_merge_updates_and_inserts(self, spark):
-        merge_data = spark.createDataFrame(
-            [(1, "alice_updated"), (5, "eve")], ["id", "name"]
-        ).coalesce(1)
-        _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
-
-        rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
-        assert rows[1] == "alice_updated"
-        assert rows[2] == "bob"
-        assert rows[5] == "eve"
-        assert len(rows) == 3
+def test_schema_inference(spark):
+    df = _read_df(spark)
+    field_names = [f.name for f in df.schema.fields]
+    assert "id" in field_names
+    assert "name" in field_names
 
 
-class TestBatchOverwrite:
-    def test_overwrite_replaces_all_rows(self, spark):
-        new_data = spark.createDataFrame([(10, "zara")], ["id", "name"])
-        _write_df(new_data, mode="overwrite")
-
-        rows = _read_df(spark).collect()
-        assert len(rows) == 1
-        assert rows[0]["id"] == 10
-        assert rows[0]["name"] == "zara"
-
-    def test_overwrite_then_read_shows_only_new_data(self, spark):
-        new_data = spark.createDataFrame(
-            [(10, "zara"), (11, "yuki")], ["id", "name"]
-        )
-        _write_df(new_data, mode="overwrite")
-
-        rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
-        assert rows == {10: "zara", 11: "yuki"}
+# Batch write
 
 
-class TestColumnProjection:
-    def test_select_single_column(self, spark):
-        df = _read_df(spark).select("name")
-        rows = df.collect()
-        assert len(rows) == 2
-        assert rows[0]["name"] in ("alice", "bob")
-        assert "id" not in rows[0].asDict()
+def test_append_inserts_new_rows(spark):
+    new_data = spark.createDataFrame([(3, "charlie"), (4, "diana")], ["id", "name"])
+    _write_df(new_data)
 
-    def test_select_reordered_columns(self, spark):
-        df = _read_df(spark).select("name", "id")
-        rows = df.orderBy("id").collect()
-        assert rows[0]["name"] == "alice"
-        assert rows[0]["id"] == 1
+    df = _read_df(spark)
+    assert df.count() == 4
+
+
+def test_append_preserves_existing_rows(spark):
+    new_data = spark.createDataFrame([(3, "charlie")], ["id", "name"])
+    _write_df(new_data)
+
+    rows = _read_df(spark).orderBy("id").collect()
+    assert rows[0]["name"] == "alice"
+    assert rows[1]["name"] == "bob"
+    assert rows[2]["name"] == "charlie"
+
+
+# Batch merge
+
+
+def test_merge_updates_existing_row(spark):
+    merge_data = spark.createDataFrame(
+        [(1, "alice_updated")], ["id", "name"]
+    ).coalesce(1)
+    _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
+
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert rows[1] == "alice_updated"
+    assert rows[2] == "bob"
+
+
+def test_merge_inserts_new_row(spark):
+    merge_data = spark.createDataFrame(
+        [(5, "eve")], ["id", "name"]
+    ).coalesce(1)
+    _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
+
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert rows[5] == "eve"
+    assert len(rows) == 3
+
+
+def test_merge_updates_and_inserts(spark):
+    merge_data = spark.createDataFrame(
+        [(1, "alice_updated"), (5, "eve")], ["id", "name"]
+    ).coalesce(1)
+    _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
+
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert rows[1] == "alice_updated"
+    assert rows[2] == "bob"
+    assert rows[5] == "eve"
+    assert len(rows) == 3
+
+
+# Batch overwrite
+
+
+def test_overwrite_replaces_all_rows(spark):
+    new_data = spark.createDataFrame([(10, "zara")], ["id", "name"])
+    _write_df(new_data, mode="overwrite")
+
+    rows = _read_df(spark).collect()
+    assert len(rows) == 1
+    assert rows[0]["id"] == 10
+    assert rows[0]["name"] == "zara"
+
+
+def test_overwrite_then_read_shows_only_new_data(spark):
+    new_data = spark.createDataFrame(
+        [(10, "zara"), (11, "yuki")], ["id", "name"]
+    )
+    _write_df(new_data, mode="overwrite")
+
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert rows == {10: "zara", 11: "yuki"}
+
+
+# Partitioned read
+
+
+def test_read_with_multiple_partitions(spark):
+    """Reading with numPartitions > 1 returns same data as single partition."""
+    reader = spark.read.format("ducklake")
+    for k, v in DUCKLAKE_OPTS.items():
+        reader = reader.option(k, v)
+    df = reader.option("numPartitions", "2").load()
+
+    rows = df.orderBy("id").collect()
+    assert len(rows) == 2
+    assert rows[0]["id"] == 1
+    assert rows[0]["name"] == "alice"
+    assert rows[1]["id"] == 2
+    assert rows[1]["name"] == "bob"
+
+
+def test_read_with_more_partitions_than_rows(spark):
+    """numPartitions > row count still returns all rows."""
+    reader = spark.read.format("ducklake")
+    for k, v in DUCKLAKE_OPTS.items():
+        reader = reader.option(k, v)
+    df = reader.option("numPartitions", "10").load()
+
+    assert df.count() == 2
+
+
+def test_partitioned_read_with_column_projection(spark):
+    """Column projection works with multiple partitions."""
+    reader = spark.read.format("ducklake")
+    for k, v in DUCKLAKE_OPTS.items():
+        reader = reader.option(k, v)
+    df = reader.option("numPartitions", "2").load().select("name")
+
+    rows = df.collect()
+    assert len(rows) == 2
+    assert "id" not in rows[0].asDict()
+
+
+# Column projection
+
+
+def test_select_single_column(spark):
+    df = _read_df(spark).select("name")
+    rows = df.collect()
+    assert len(rows) == 2
+    assert rows[0]["name"] in ("alice", "bob")
+    assert "id" not in rows[0].asDict()
+
+
+def test_select_reordered_columns(spark):
+    df = _read_df(spark).select("name", "id")
+    rows = df.orderBy("id").collect()
+    assert rows[0]["name"] == "alice"
+    assert rows[0]["id"] == 1

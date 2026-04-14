@@ -3,3 +3,4 @@
 cdc-lambda/target/
 docs/
 **/*__pycache__/
+.claude/

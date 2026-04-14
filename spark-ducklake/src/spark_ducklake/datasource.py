@@ -72,7 +72,8 @@ class DuckLakeDataSource(DataSource):
         config = DuckLakeConfig.from_options(self.options)
         table = self.options["table"]
         columns = [field.name for field in schema.fields]
-        return DuckLakeReader(config, table, columns)
+        num_partitions = int(self.options.get("numPartitions", "1"))
+        return DuckLakeReader(config, table, columns, num_partitions)
 
     def writer(self, schema: StructType, overwrite: bool) -> DuckLakeWriter:
         config = DuckLakeConfig.from_options(self.options)
@@ -92,7 +93,11 @@ class DuckLakeDataSource(DataSource):
         table = self.options["table"]
         columns = [field.name for field in schema.fields]
         read_change_feed = self.options.get("readChangeFeed", "false").lower() == "true"
-        return DuckLakeStreamReader(config, table, read_change_feed, columns)
+        starting_version = int(self.options.get("startingVersion", "0"))
+        max_snapshots_per_batch = int(self.options.get("maxSnapshotsPerBatch", "0"))
+        return DuckLakeStreamReader(
+            config, table, read_change_feed, columns, starting_version, max_snapshots_per_batch
+        )
 
     def streamWriter(
         self, schema: StructType, overwrite: bool

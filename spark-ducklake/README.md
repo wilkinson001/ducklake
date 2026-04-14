@@ -42,6 +42,9 @@ df.show()
 | `readChangeFeed` | No | `"true"` to enable CDC stream reads (default: `"false"`) |
 | `writeMode` | No | `"append"` or `"merge"` (default: `"append"`) |
 | `mergeKeys` | No | Comma-separated merge key columns (required when `writeMode=merge`) |
+| `numPartitions` | No | Number of partitions for batch reads (default: `"1"`) |
+| `startingVersion` | No | Snapshot ID to start streaming from (default: `"0"`) |
+| `maxSnapshotsPerBatch` | No | Max snapshots per micro-batch, `"0"` for unlimited (default: `"0"`) |
 
 ## Usage
 
@@ -189,12 +192,9 @@ DuckDB runs on both the Spark driver and executors. A pickle-serializable `DuckL
 
 ### Readers
 
-- **No partition pruning** — batch reader does a full table scan in a single partition. Should split reads by row ranges or a partition column for parallel executor reads on large tables.
-- **No predicate pushdown** — filters are applied by Spark after reading all rows. Should push WHERE clauses to DuckDB.
-- **No column projection in CDC mode** — CDC stream reads always use `SELECT *`. Should project user-requested columns plus CDC metadata columns.
+- **No predicate pushdown** — PySpark's Python DataSource V2 API does not support filter pushdown. All filters are applied by Spark after reading. This is a platform limitation, not a connector limitation.
+- **No column projection in CDC mode** — CDC stream reads use `SELECT *` because the change feed includes metadata columns. This matches Delta Lake's change feed behavior. Users can `.drop()` unwanted columns after reading.
 - **No schema evolution handling** — if the DuckLake table schema changes between snapshots, the stream reader doesn't adapt.
-- **No starting offset configuration** — stream reader always starts from snapshot 0. Should support `startingVersion` or `startingTimestamp` options.
-- **No rate limiting** — no control over snapshots processed per micro-batch. Should support `maxSnapshotsPerBatch` to avoid huge micro-batches after downtime.
 
 ### Writers
 
