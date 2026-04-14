@@ -2,3 +2,4 @@
 .venv
 cdc-lambda/target/
 docs/
+**/*__pycache__/
