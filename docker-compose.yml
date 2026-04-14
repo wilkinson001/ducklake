@@ -51,6 +51,7 @@ services:
   spark:
     build:
       context: ./spark-ducklake
+      target: test
     volumes:
       - ./spark-ducklake:/opt/spark-ducklake:ro
     environment:

@@ -12,7 +12,17 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "pytest-cov>=6.0",
 ]
+
+[tool.pytest.ini_options]
+addopts = "--cov=spark_ducklake --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["spark_ducklake"]
+
+[tool.coverage.report]
+show_missing = true
 
 [build-system]
 requires = ["hatchling"]

@@ -58,8 +58,8 @@ def _read_df(spark):
     return reader.load()
 
 
-def _write_df(df, extra_opts=None):
-    writer = df.write.format("ducklake").mode("append")
+def _write_df(df, extra_opts=None, mode="append"):
+    writer = df.write.format("ducklake").mode(mode)
     for k, v in DUCKLAKE_OPTS.items():
         writer = writer.option(k, v)
     if extra_opts:
@@ -135,3 +135,38 @@ class TestBatchMerge:
         assert rows[2] == "bob"
         assert rows[5] == "eve"
         assert len(rows) == 3
+
+
+class TestBatchOverwrite:
+    def test_overwrite_replaces_all_rows(self, spark):
+        new_data = spark.createDataFrame([(10, "zara")], ["id", "name"])
+        _write_df(new_data, mode="overwrite")
+
+        rows = _read_df(spark).collect()
+        assert len(rows) == 1
+        assert rows[0]["id"] == 10
+        assert rows[0]["name"] == "zara"
+
+    def test_overwrite_then_read_shows_only_new_data(self, spark):
+        new_data = spark.createDataFrame(
+            [(10, "zara"), (11, "yuki")], ["id", "name"]
+        )
+        _write_df(new_data, mode="overwrite")
+
+        rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+        assert rows == {10: "zara", 11: "yuki"}
+
+
+class TestColumnProjection:
+    def test_select_single_column(self, spark):
+        df = _read_df(spark).select("name")
+        rows = df.collect()
+        assert len(rows) == 2
+        assert rows[0]["name"] in ("alice", "bob")
+        assert "id" not in rows[0].asDict()
+
+    def test_select_reordered_columns(self, spark):
+        df = _read_df(spark).select("name", "id")
+        rows = df.orderBy("id").collect()
+        assert rows[0]["name"] == "alice"
+        assert rows[0]["id"] == 1
