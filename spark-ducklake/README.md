@@ -202,13 +202,12 @@ DuckDB runs on both the Spark driver and executors. A pickle-serializable `DuckL
 - **No abort rollback** — partial writes from successful executors can't be rolled back on abort. Should track pre-batch snapshot and restore on failure.
 - **No partition-level overwrite** — overwrite deletes the entire table. Should support `replaceWhere` for partition-scoped overwrites.
 - **No schema validation** — mismatches between DataFrame and DuckLake table schemas fail with raw DuckDB errors at the executor level.
-- **No write batching** — `write()` materialises the entire partition into a pandas DataFrame in memory. Should batch large partitions to avoid OOM.
+- **No write batching** — `write()` materialises the entire partition into a PyArrow table in memory. Should batch large partitions to avoid OOM.
 - **No idempotent writes** — stream writer doesn't use `batchId` for deduplication. Retried micro-batches produce duplicates.
 - **No delete support** — no way to delete rows from Spark.
 
 ### Both
 
-- **No connection pooling** — every `read()` and `write()` call creates a new DuckDB connection, installs extensions, and attaches the catalog.
 - **No SQL injection protection** — table names and column names are interpolated directly into SQL. Should validate identifiers or use DuckDB's quoting.
 - **No Spark metrics** — no custom task metrics reported (rows read/written, bytes scanned).
 - **Plaintext credentials** — S3 credentials passed as Spark options. Should support IAM roles, instance profiles, and credential providers.

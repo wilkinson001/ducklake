@@ -21,6 +21,7 @@ from pyspark.sql.types import (
 )
 
 from spark_ducklake.connection import DuckLakeConfig
+from spark_ducklake.pool import get_connection
 from spark_ducklake.reader import DuckLakeReader, DuckLakeStreamReader
 from spark_ducklake.writer import DuckLakeWriter, DuckLakeStreamWriter
 
@@ -57,16 +58,13 @@ class DuckLakeDataSource(DataSource):
     def schema(self) -> StructType:
         config = DuckLakeConfig.from_options(self.options)
         table = self.options["table"]
-        conn = config.connect()
-        try:
-            rows = conn.execute(f"DESCRIBE my_lake.{table}").fetchall()
-            fields = [
-                StructField(row[0], duckdb_type_to_spark(row[1]), nullable=True)
-                for row in rows
-            ]
-            return StructType(fields)
-        finally:
-            conn.close()
+        conn = get_connection(config)
+        rows = conn.execute(f"DESCRIBE my_lake.{table}").fetchall()
+        fields = [
+            StructField(row[0], duckdb_type_to_spark(row[1]), nullable=True)
+            for row in rows
+        ]
+        return StructType(fields)
 
     def reader(self, schema: StructType) -> DataSourceReader:
         config = DuckLakeConfig.from_options(self.options)
@@ -79,11 +77,8 @@ class DuckLakeDataSource(DataSource):
         config = DuckLakeConfig.from_options(self.options)
         table = self.options["table"]
         if overwrite:
-            conn = config.connect()
-            try:
-                conn.execute(f"DELETE FROM my_lake.{table}")
-            finally:
-                conn.close()
+            conn = get_connection(config)
+            conn.execute(f"DELETE FROM my_lake.{table}")
         write_mode = self.options.get("writeMode", "append")
         merge_keys = self.options.get("mergeKeys", "")
         return DuckLakeWriter(config, table, schema, write_mode, merge_keys)
@@ -96,7 +91,12 @@ class DuckLakeDataSource(DataSource):
         starting_version = int(self.options.get("startingVersion", "0"))
         max_snapshots_per_batch = int(self.options.get("maxSnapshotsPerBatch", "0"))
         return DuckLakeStreamReader(
-            config, table, read_change_feed, columns, starting_version, max_snapshots_per_batch
+            config,
+            table,
+            read_change_feed,
+            columns,
+            starting_version,
+            max_snapshots_per_batch,
         )
 
     def streamWriter(
@@ -106,4 +106,6 @@ class DuckLakeDataSource(DataSource):
         table = self.options["table"]
         write_mode = self.options.get("writeMode", "append")
         merge_keys = self.options.get("mergeKeys", "")
-        return DuckLakeStreamWriter(config, table, schema, write_mode, merge_keys, overwrite)
+        return DuckLakeStreamWriter(
+            config, table, schema, write_mode, merge_keys, overwrite
+        )

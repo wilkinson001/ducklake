@@ -1,6 +1,10 @@
 import pickle
 
-from spark_ducklake.reader import DuckLakeBatchPartition, DuckLakePartition, _column_list
+from spark_ducklake.reader import (
+    DuckLakeBatchPartition,
+    DuckLakePartition,
+    _column_list,
+)
 
 
 def test_column_list_with_columns():

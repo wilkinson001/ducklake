@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import duckdb
 
 
-@dataclass
+@dataclass(frozen=True)
 class DuckLakeConfig:
     postgres_conn: str
     s3_endpoint: str

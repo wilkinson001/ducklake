@@ -7,10 +7,12 @@ from spark_ducklake.connection import DuckLakeConfig
 from spark_ducklake.writer import DuckLakeWriter, DuckLakeStreamWriter
 
 
-SCHEMA = StructType([
-    StructField("id", IntegerType(), True),
-    StructField("name", StringType(), True),
-])
+SCHEMA = StructType(
+    [
+        StructField("id", IntegerType(), True),
+        StructField("name", StringType(), True),
+    ]
+)
 
 CONFIG = DuckLakeConfig(
     postgres_conn="dbname=test",
@@ -44,7 +46,9 @@ def test_stream_writer_is_picklable():
 
 
 def test_stream_writer_merge_mode_is_picklable():
-    w = DuckLakeStreamWriter(CONFIG, "test_table", SCHEMA, "merge", "id,tenant_id", False)
+    w = DuckLakeStreamWriter(
+        CONFIG, "test_table", SCHEMA, "merge", "id,tenant_id", False
+    )
     restored = pickle.loads(pickle.dumps(w))
     assert restored.write_mode == "merge"
     assert restored.merge_keys == "id,tenant_id"

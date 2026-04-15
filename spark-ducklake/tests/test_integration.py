@@ -4,7 +4,6 @@ Run inside the Spark Docker container with docker-compose services running:
     docker compose exec spark python3 -m pytest /opt/spark-ducklake/tests/test_integration.py -v
 """
 
-import duckdb
 import pytest
 from pyspark.sql import SparkSession
 
@@ -113,9 +112,9 @@ def test_append_preserves_existing_rows(spark):
 
 
 def test_merge_updates_existing_row(spark):
-    merge_data = spark.createDataFrame(
-        [(1, "alice_updated")], ["id", "name"]
-    ).coalesce(1)
+    merge_data = spark.createDataFrame([(1, "alice_updated")], ["id", "name"]).coalesce(
+        1
+    )
     _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
 
     rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
@@ -124,9 +123,7 @@ def test_merge_updates_existing_row(spark):
 
 
 def test_merge_inserts_new_row(spark):
-    merge_data = spark.createDataFrame(
-        [(5, "eve")], ["id", "name"]
-    ).coalesce(1)
+    merge_data = spark.createDataFrame([(5, "eve")], ["id", "name"]).coalesce(1)
     _write_df(merge_data, {"writeMode": "merge", "mergeKeys": "id"})
 
     rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
@@ -161,9 +158,7 @@ def test_overwrite_replaces_all_rows(spark):
 
 
 def test_overwrite_then_read_shows_only_new_data(spark):
-    new_data = spark.createDataFrame(
-        [(10, "zara"), (11, "yuki")], ["id", "name"]
-    )
+    new_data = spark.createDataFrame([(10, "zara"), (11, "yuki")], ["id", "name"])
     _write_df(new_data, mode="overwrite")
 
     rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
