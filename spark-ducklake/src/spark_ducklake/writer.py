@@ -8,7 +8,7 @@ from pyspark.sql.datasource import (
 )
 from pyspark.sql.types import StructType
 
-from spark_ducklake.connection import DuckLakeConfig
+from spark_ducklake.connection import DuckLakeConfig, quote_identifier
 from spark_ducklake.pool import get_connection
 
 logger = logging.getLogger(__name__)
@@ -21,7 +21,7 @@ def _insert_rows(conn, table: str, rows: list, schema: StructType):
     columns = [field.name for field in schema.fields]
     cols = list(zip(*rows))
     _batch = pa.table({name: list(col) for name, col in zip(columns, cols)})
-    conn.execute(f"INSERT INTO my_lake.{table} SELECT * FROM _batch")
+    conn.execute(f"INSERT INTO my_lake.{quote_identifier(table)} SELECT * FROM _batch")
 
 
 def _merge_rows(conn, table: str, rows: list, schema: StructType, merge_keys: str):
@@ -33,10 +33,12 @@ def _merge_rows(conn, table: str, rows: list, schema: StructType, merge_keys: st
     _batch = pa.table({name: list(col) for name, col in zip(columns, cols)})
 
     keys = [k.strip() for k in merge_keys.split(",")]
-    on_clause = " AND ".join(f"target.{k} = source.{k}" for k in keys)
+    on_clause = " AND ".join(
+        f"target.{quote_identifier(k)} = source.{quote_identifier(k)}" for k in keys
+    )
 
     conn.execute(
-        f"""MERGE INTO my_lake.{table} AS target
+        f"""MERGE INTO my_lake.{quote_identifier(table)} AS target
             USING _batch AS source
             ON {on_clause}
             WHEN MATCHED THEN UPDATE SET *
@@ -98,7 +100,7 @@ class DuckLakeStreamWriter(DataSourceStreamWriter):
         conn = get_connection(self.config)
         rows = list(iterator)
         if self.overwrite:
-            conn.execute(f"DELETE FROM my_lake.{self.table}")
+            conn.execute(f"DELETE FROM my_lake.{quote_identifier(self.table)}")
         if self.write_mode == "merge":
             _merge_rows(conn, self.table, rows, self.schema, self.merge_keys)
         else:

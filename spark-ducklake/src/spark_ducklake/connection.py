@@ -3,6 +3,10 @@ from dataclasses import dataclass
 import duckdb
 
 
+def quote_identifier(name: str) -> str:
+    return '"' + name.replace('"', '""') + '"'
+
+
 @dataclass(frozen=True)
 class DuckLakeConfig:
     postgres_conn: str

@@ -1,6 +1,8 @@
 import pickle
 
-from spark_ducklake.connection import DuckLakeConfig
+import pytest
+
+from spark_ducklake.connection import DuckLakeConfig, quote_identifier
 
 
 def test_config_from_options():
@@ -45,3 +47,16 @@ def test_config_is_picklable():
     assert restored.s3_secret_key == config.s3_secret_key
     assert restored.s3_bucket == config.s3_bucket
     assert restored.s3_use_ssl == config.s3_use_ssl
+
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("test_table", '"test_table"'),
+        ('my"table', '"my""table"'),
+        ("my table", '"my table"'),
+        ("select", '"select"'),
+    ],
+)
+def test_quote_identifier(name, expected):
+    assert quote_identifier(name) == expected

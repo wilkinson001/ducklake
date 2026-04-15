@@ -4,13 +4,13 @@ from pyspark.sql.datasource import (
     InputPartition,
 )
 
-from spark_ducklake.connection import DuckLakeConfig
+from spark_ducklake.connection import DuckLakeConfig, quote_identifier
 from spark_ducklake.pool import get_connection
 
 
 def _column_list(columns: list[str]) -> str:
     if columns:
-        return ", ".join(columns)
+        return ", ".join(quote_identifier(c) for c in columns)
     return "*"
 
 
@@ -41,7 +41,9 @@ class DuckLakeReader(DataSourceReader):
 
     def partitions(self):
         conn = get_connection(self.config)
-        count = conn.execute(f"SELECT COUNT(*) FROM my_lake.{self.table}").fetchone()[0]
+        count = conn.execute(
+            f"SELECT COUNT(*) FROM my_lake.{quote_identifier(self.table)}"
+        ).fetchone()[0]
 
         if self.num_partitions <= 1 or count == 0:
             return [DuckLakeBatchPartition(limit=count or 1, offset=0)]
@@ -57,7 +59,8 @@ class DuckLakeReader(DataSourceReader):
         conn = get_connection(self.config)
         cols = _column_list(self.columns)
         result = conn.execute(
-            f"SELECT {cols} FROM my_lake.{self.table} LIMIT {partition.limit} OFFSET {partition.offset}"
+            f"SELECT {cols} FROM my_lake.{quote_identifier(self.table)}"
+            f" LIMIT {partition.limit} OFFSET {partition.offset}"
         ).fetchall()
         yield from result
 

@@ -20,7 +20,7 @@ from pyspark.sql.types import (
     TimestampType,
 )
 
-from spark_ducklake.connection import DuckLakeConfig
+from spark_ducklake.connection import DuckLakeConfig, quote_identifier
 from spark_ducklake.pool import get_connection
 from spark_ducklake.reader import DuckLakeReader, DuckLakeStreamReader
 from spark_ducklake.writer import DuckLakeWriter, DuckLakeStreamWriter
@@ -59,7 +59,7 @@ class DuckLakeDataSource(DataSource):
         config = DuckLakeConfig.from_options(self.options)
         table = self.options["table"]
         conn = get_connection(config)
-        rows = conn.execute(f"DESCRIBE my_lake.{table}").fetchall()
+        rows = conn.execute(f"DESCRIBE my_lake.{quote_identifier(table)}").fetchall()
         fields = [
             StructField(row[0], duckdb_type_to_spark(row[1]), nullable=True)
             for row in rows
@@ -78,7 +78,7 @@ class DuckLakeDataSource(DataSource):
         table = self.options["table"]
         if overwrite:
             conn = get_connection(config)
-            conn.execute(f"DELETE FROM my_lake.{table}")
+            conn.execute(f"DELETE FROM my_lake.{quote_identifier(table)}")
         write_mode = self.options.get("writeMode", "append")
         merge_keys = self.options.get("mergeKeys", "")
         return DuckLakeWriter(config, table, schema, write_mode, merge_keys)

@@ -1,5 +1,7 @@
 import pickle
 
+import pytest
+
 from spark_ducklake.reader import (
     DuckLakeBatchPartition,
     DuckLakePartition,
@@ -7,16 +9,16 @@ from spark_ducklake.reader import (
 )
 
 
-def test_column_list_with_columns():
-    assert _column_list(["id", "name"]) == "id, name"
-
-
-def test_column_list_single_column():
-    assert _column_list(["id"]) == "id"
-
-
-def test_column_list_empty_returns_star():
-    assert _column_list([]) == "*"
+@pytest.mark.parametrize(
+    "columns, expected",
+    [
+        (["id", "name"], '"id", "name"'),
+        (["id"], '"id"'),
+        ([], "*"),
+    ],
+)
+def test_column_list(columns, expected):
+    assert _column_list(columns) == expected
 
 
 def test_batch_partition_stores_limit_offset():

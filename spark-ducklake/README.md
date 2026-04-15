@@ -208,6 +208,5 @@ DuckDB runs on both the Spark driver and executors. A pickle-serializable `DuckL
 
 ### Both
 
-- **No SQL injection protection** — table names and column names are interpolated directly into SQL. Should validate identifiers or use DuckDB's quoting.
 - **No Spark metrics** — no custom task metrics reported (rows read/written, bytes scanned).
 - **Plaintext credentials** — S3 credentials passed as Spark options. Should support IAM roles, instance profiles, and credential providers.
