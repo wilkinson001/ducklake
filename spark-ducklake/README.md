@@ -32,7 +32,7 @@ df.show()
 
 | Option | Required | Description |
 |--------|----------|-------------|
-| `table` | Yes | DuckLake table name |
+| `table` | Yes | DuckLake table name, optionally prefixed with schema (e.g. `"my_table"` or `"custom_schema.my_table"`) |
 | `postgres_conn` | Yes | PostgreSQL connection string for DuckLake metadata catalog |
 | `s3_endpoint` | Yes | S3-compatible endpoint (e.g. `minio:9000`) |
 | `s3_access_key` | Yes | S3 access key |
@@ -45,6 +45,7 @@ df.show()
 | `numPartitions` | No | Number of partitions for batch reads (default: `"1"`) |
 | `startingVersion` | No | Snapshot ID to start streaming from (default: `"0"`) |
 | `maxSnapshotsPerBatch` | No | Max snapshots per micro-batch, `"0"` for unlimited (default: `"0"`) |
+| `writeBatchSize` | No | Maximum rows per DuckDB write statement (default: `"10000"`) |
 
 ## Usage
 
@@ -202,7 +203,6 @@ DuckDB runs on both the Spark driver and executors. A pickle-serializable `DuckL
 - **No abort rollback** — partial writes from successful executors can't be rolled back on abort. Should track pre-batch snapshot and restore on failure.
 - **No partition-level overwrite** — overwrite deletes the entire table. Should support `replaceWhere` for partition-scoped overwrites.
 - **No schema validation** — mismatches between DataFrame and DuckLake table schemas fail with raw DuckDB errors at the executor level.
-- **No write batching** — `write()` materialises the entire partition into a PyArrow table in memory. Should batch large partitions to avoid OOM.
 - **No idempotent writes** — stream writer doesn't use `batchId` for deduplication. Retried micro-batches produce duplicates.
 - **No delete support** — no way to delete rows from Spark.
 

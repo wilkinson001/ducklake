@@ -7,6 +7,15 @@ def quote_identifier(name: str) -> str:
     return '"' + name.replace('"', '""') + '"'
 
 
+def parse_table_name(name: str) -> tuple[str, str]:
+    parts = name.split(".")
+    if len(parts) == 1:
+        return ("main", parts[0])
+    if len(parts) == 2:
+        return (parts[0], parts[1])
+    raise ValueError(f"Invalid table name '{name}': expected 'table' or 'schema.table'")
+
+
 @dataclass(frozen=True)
 class DuckLakeConfig:
     postgres_conn: str

@@ -4,6 +4,9 @@ Run inside the Spark Docker container with docker-compose services running:
     docker compose exec spark python3 -m pytest /opt/spark-ducklake/tests/test_integration.py -v
 """
 
+import tempfile
+import time
+
 import pytest
 from pyspark.sql import SparkSession
 
@@ -221,3 +224,208 @@ def test_select_reordered_columns(spark):
     rows = df.orderBy("id").collect()
     assert rows[0]["name"] == "alice"
     assert rows[0]["id"] == 1
+
+
+# Write batching
+
+
+def test_batched_write_inserts_all_rows(spark):
+    """Writing more rows than writeBatchSize still inserts everything."""
+    data = [(i, f"user_{i}") for i in range(100)]
+    new_data = spark.createDataFrame(data, ["id", "name"])
+
+    writer = new_data.write.format("ducklake").mode("overwrite")
+    for k, v in DUCKLAKE_OPTS.items():
+        writer = writer.option(k, v)
+    writer.option("writeBatchSize", "10").save()
+
+    df = _read_df(spark)
+    assert df.count() == 100
+
+
+def test_batched_merge_across_multiple_batches(spark):
+    """Merge with more rows than writeBatchSize produces correct upsert results."""
+    data = [(i, f"new_{i}") for i in range(1, 21)]
+    merge_data = spark.createDataFrame(data, ["id", "name"]).coalesce(1)
+
+    _write_df(
+        merge_data,
+        {"writeMode": "merge", "mergeKeys": "id", "writeBatchSize": "5"},
+    )
+
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert rows[1] == "new_1"
+    assert rows[2] == "new_2"
+    assert len(rows) == 20
+
+
+# Stream read
+
+
+def _stream_reader(spark, extra_opts=None):
+    reader = spark.readStream.format("ducklake")
+    for k, v in DUCKLAKE_OPTS.items():
+        reader = reader.option(k, v)
+    if extra_opts:
+        for k, v in extra_opts.items():
+            reader = reader.option(k, v)
+    return reader.load()
+
+
+def _wait_for_condition(query, condition_fn, timeout_sec=30):
+    start = time.time()
+    while not condition_fn(query):
+        if time.time() - start >= timeout_sec:
+            raise TimeoutError(
+                f"Timeout after {timeout_sec}s. Query exception: {query.exception()}"
+            )
+        time.sleep(0.2)
+
+
+def test_stream_read_picks_up_insertions(spark):
+    """Stream reader emits rows inserted since last offset."""
+    df = _stream_reader(spark)
+    results = []
+
+    def collect_batch(batch_df, batch_id):
+        results.extend(batch_df.collect())
+
+    q = df.writeStream.trigger(availableNow=True).foreachBatch(collect_batch).start()
+    q.awaitTermination(timeout=30)
+    assert q.exception() is None
+    assert len(results) == 2
+
+
+def test_stream_read_starting_version(spark, ducklake_config):
+    """startingVersion with a non-zero value produces a working stream that includes new data."""
+    # Get the current latest snapshot after fixture setup
+    conn = ducklake_config.connect()
+    try:
+        latest = conn.execute(
+            "SELECT MAX(snapshot_id) FROM ducklake_snapshots('my_lake')"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    # Insert new data (creates a new snapshot)
+    conn = ducklake_config.connect()
+    try:
+        conn.execute("INSERT INTO my_lake.test_table VALUES (3, 'charlie')")
+    finally:
+        conn.close()
+
+    # Stream from the latest snapshot — should include charlie
+    df = _stream_reader(spark, {"startingVersion": str(latest)})
+    results = []
+
+    def collect_batch(batch_df, batch_id):
+        results.extend(batch_df.collect())
+
+    q = df.writeStream.trigger(availableNow=True).foreachBatch(collect_batch).start()
+    q.awaitTermination(timeout=30)
+    assert q.exception() is None
+    assert len(results) > 0
+    names = [r["name"] for r in results]
+    assert "charlie" in names
+
+
+@pytest.mark.skip(
+    reason="CDC returns metadata columns not in schema() — known limitation"
+)
+def test_stream_read_cdc_change_feed(spark, ducklake_config):
+    """readChangeFeed=true emits change records with metadata columns."""
+    conn = ducklake_config.connect()
+    try:
+        latest = conn.execute(
+            "SELECT MAX(snapshot_id) FROM ducklake_snapshots('my_lake')"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+
+    conn = ducklake_config.connect()
+    try:
+        conn.execute("INSERT INTO my_lake.test_table VALUES (3, 'charlie')")
+    finally:
+        conn.close()
+
+    df = _stream_reader(
+        spark,
+        {"readChangeFeed": "true", "startingVersion": str(latest)},
+    )
+    results = []
+
+    def collect_batch(batch_df, batch_id):
+        results.extend(batch_df.collect())
+
+    q = df.writeStream.trigger(availableNow=True).foreachBatch(collect_batch).start()
+    q.awaitTermination(timeout=30)
+    assert q.exception() is None
+    assert len(results) >= 1
+
+
+# Stream write
+
+
+def test_stream_write_appends_rows(spark, ducklake_config):
+    """Stream writer appends rows to a DuckLake table."""
+    source_data = spark.createDataFrame([(3, "charlie"), (4, "diana")], ["id", "name"])
+    input_dir = tempfile.mkdtemp()
+    checkpoint_dir = tempfile.mkdtemp()
+    source_data.write.format("json").mode("overwrite").save(input_dir)
+
+    stream_df = spark.readStream.schema("id int, name string").json(input_dir)
+
+    writer = stream_df.writeStream.format("ducklake")
+    for k, v in DUCKLAKE_OPTS.items():
+        writer = writer.option(k, v)
+    q = (
+        writer.option("checkpointLocation", checkpoint_dir)
+        .trigger(availableNow=True)
+        .start()
+    )
+    q.awaitTermination(timeout=30)
+    assert q.exception() is None
+
+    conn = ducklake_config.connect()
+    try:
+        count = conn.execute("SELECT COUNT(*) FROM my_lake.test_table").fetchone()[0]
+    finally:
+        conn.close()
+    assert count == 4
+
+
+# Custom schema
+
+
+def test_read_write_with_custom_schema(spark, ducklake_config):
+    """Tables in a non-default schema can be read and written."""
+    conn = ducklake_config.connect()
+    try:
+        conn.execute("CREATE SCHEMA IF NOT EXISTS my_lake.custom")
+        conn.execute("DROP TABLE IF EXISTS my_lake.custom.schema_test")
+        conn.execute(
+            "CREATE TABLE my_lake.custom.schema_test (id INTEGER, name VARCHAR)"
+        )
+        conn.execute("INSERT INTO my_lake.custom.schema_test VALUES (1, 'alice')")
+    finally:
+        conn.close()
+
+    reader = spark.read.format("ducklake")
+    for k, v in DUCKLAKE_OPTS.items():
+        reader = reader.option(k, v)
+    df = reader.option("table", "custom.schema_test").load()
+
+    rows = df.collect()
+    assert len(rows) == 1
+    assert rows[0]["id"] == 1
+    assert rows[0]["name"] == "alice"
+
+    # Write back to the custom schema table
+    new_data = spark.createDataFrame([(2, "bob")], ["id", "name"])
+    writer = new_data.write.format("ducklake").mode("append")
+    for k, v in DUCKLAKE_OPTS.items():
+        writer = writer.option(k, v)
+    writer.option("table", "custom.schema_test").save()
+
+    df2 = reader.option("table", "custom.schema_test").load()
+    assert df2.count() == 2

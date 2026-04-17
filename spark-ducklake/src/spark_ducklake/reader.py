@@ -30,11 +30,13 @@ class DuckLakeReader(DataSourceReader):
     def __init__(
         self,
         config: DuckLakeConfig,
+        schema: str,
         table: str,
         columns: list[str],
         num_partitions: int = 1,
     ):
         self.config = config
+        self.schema = schema
         self.table = table
         self.columns = columns
         self.num_partitions = num_partitions
@@ -42,7 +44,7 @@ class DuckLakeReader(DataSourceReader):
     def partitions(self):
         conn = get_connection(self.config)
         count = conn.execute(
-            f"SELECT COUNT(*) FROM my_lake.{quote_identifier(self.table)}"
+            f"SELECT COUNT(*) FROM my_lake.{quote_identifier(self.schema)}.{quote_identifier(self.table)}"
         ).fetchone()[0]
 
         if self.num_partitions <= 1 or count == 0:
@@ -59,7 +61,7 @@ class DuckLakeReader(DataSourceReader):
         conn = get_connection(self.config)
         cols = _column_list(self.columns)
         result = conn.execute(
-            f"SELECT {cols} FROM my_lake.{quote_identifier(self.table)}"
+            f"SELECT {cols} FROM my_lake.{quote_identifier(self.schema)}.{quote_identifier(self.table)}"
             f" LIMIT {partition.limit} OFFSET {partition.offset}"
         ).fetchall()
         yield from result
@@ -69,6 +71,7 @@ class DuckLakeStreamReader(DataSourceStreamReader):
     def __init__(
         self,
         config: DuckLakeConfig,
+        schema: str,
         table: str,
         read_change_feed: bool,
         columns: list[str],
@@ -76,6 +79,7 @@ class DuckLakeStreamReader(DataSourceStreamReader):
         max_snapshots_per_batch: int = 0,
     ):
         self.config = config
+        self.schema = schema
         self.table = table
         self.read_change_feed = read_change_feed
         self.columns = columns
@@ -107,14 +111,14 @@ class DuckLakeStreamReader(DataSourceStreamReader):
         if self.read_change_feed:
             sql = (
                 f"SELECT * FROM ducklake_table_changes("
-                f"'my_lake', '{self.table}', "
+                f"'my_lake', '{self.schema}', '{self.table}', "
                 f"{partition.start_snapshot}, {partition.end_snapshot})"
             )
         else:
             cols = _column_list(self.columns)
             sql = (
                 f"SELECT {cols} FROM ducklake_table_insertions("
-                f"'my_lake', '{self.table}', "
+                f"'my_lake', '{self.schema}', '{self.table}', "
                 f"{partition.start_snapshot}, {partition.end_snapshot})"
             )
         result = conn.execute(sql).fetchall()

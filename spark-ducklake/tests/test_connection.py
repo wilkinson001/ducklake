@@ -2,7 +2,7 @@ import pickle
 
 import pytest
 
-from spark_ducklake.connection import DuckLakeConfig, quote_identifier
+from spark_ducklake.connection import DuckLakeConfig, parse_table_name, quote_identifier
 
 
 def test_config_from_options():
@@ -60,3 +60,19 @@ def test_config_is_picklable():
 )
 def test_quote_identifier(name, expected):
     assert quote_identifier(name) == expected
+
+
+@pytest.mark.parametrize(
+    "name, expected",
+    [
+        ("my_table", ("main", "my_table")),
+        ("custom.my_table", ("custom", "my_table")),
+    ],
+)
+def test_parse_table_name(name, expected):
+    assert parse_table_name(name) == expected
+
+
+def test_parse_table_name_rejects_three_parts():
+    with pytest.raises(ValueError, match="Invalid table name"):
+        parse_table_name("a.b.c")
