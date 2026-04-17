@@ -168,10 +168,12 @@ docker compose exec spark pyspark
 ```
 
 The Dockerfile uses a multistage build:
-- `base` stage: production image with pyspark, duckdb, pyarrow, pandas
+
+- `base` stage: production image with pyspark, duckdb, pyarrow
 - `test` stage: extends base with pytest and pytest-cov
 
 Build the production image:
+
 ```bash
 docker build --target base -t spark-ducklake:prod ./spark-ducklake
 ```
