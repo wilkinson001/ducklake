@@ -45,7 +45,8 @@ df.show()
 | `numPartitions` | No | Number of partitions for batch reads (default: `"1"`) |
 | `startingVersion` | No | Snapshot ID to start streaming from (default: `"0"`) |
 | `maxSnapshotsPerBatch` | No | Max snapshots per micro-batch, `"0"` for unlimited (default: `"0"`) |
-| `writeBatchSize` | No | Maximum rows per DuckDB write statement (default: `"10000"`) |
+| `writeBatchSize` | No | Maximum rows per DuckDB merge statement (default: `"10000"`) |
+| `maxRecordsPerFile` | No | Maximum rows per Parquet file for append/overwrite writes (default: `"1000000"`) |
 
 ## Usage
 
@@ -86,10 +87,23 @@ df.write.format("ducklake") \
 
 ### Batch Write (merge/upsert)
 
-Merge requires `.coalesce(1)` to avoid concurrent transaction conflicts between executors.
+Merge operations require a partitioning strategy to avoid DuckLake transaction conflicts between executors. Two options:
+
+**Option 1: `coalesce(1)`** — serialise all data through one executor. Simplest, guaranteed no conflicts. Best for small merge batches.
 
 ```python
 df.coalesce(1).write.format("ducklake") \
+    .option("table", "my_table") \
+    .option("writeMode", "merge") \
+    .option("mergeKeys", "id") \
+    .option(...) \
+    .mode("append").save()
+```
+
+**Option 2: `repartition(N, "key")`** — partition by merge key so each executor handles a disjoint set of keys. Parallel, no conflicts. Best for large merges with a good distribution key.
+
+```python
+df.repartition(4, "id").write.format("ducklake") \
     .option("table", "my_table") \
     .option("writeMode", "merge") \
     .option("mergeKeys", "id") \
@@ -182,13 +196,17 @@ docker build --target base -t spark-ducklake:prod ./spark-ducklake
 
 DuckDB runs on both the Spark driver and executors. A pickle-serializable `DuckLakeConfig` is sent to executors, where `connect()` creates a fresh DuckDB connection with extensions loaded and the DuckLake catalog attached.
 
+DuckLake uses optimistic concurrency with automatic retry for non-conflicting operations. Concurrent appends to the same table are automatically resolved. Concurrent merges on overlapping data are detected as logical conflicts and will fail — partition your data to avoid this (see [Batch Write (merge/upsert)](#batch-write-mergeupsert)).
+
 | Method | Runs on | Operation |
 |--------|---------|-----------|
 | `schema()` | Driver | `DESCRIBE my_lake.<table>` |
 | `latestOffset()` | Driver | `ducklake_snapshots` |
 | `read()` | Executor | `SELECT` / `ducklake_table_insertions` / `ducklake_table_changes` |
-| `write()` | Executor | `INSERT INTO` / `MERGE INTO` |
-| `commit()` | Driver | No-op (writes committed at executor level) |
+| `write()` (append/overwrite) | Executor | Write Parquet files to S3 via PyArrow |
+| `write()` (merge) | Executor | `MERGE INTO` via DuckDB |
+| `commit()` (append/overwrite) | Driver | `ducklake_add_data_files` (atomic file registration) |
+| `commit()` (merge) | Driver | No-op (writes committed at executor level) |
 | `abort()` | Driver | Log warning |
 
 ## Known Limitations and Future Work
@@ -201,11 +219,11 @@ DuckDB runs on both the Spark driver and executors. A pickle-serializable `DuckL
 
 ### Writers
 
-- **Concurrent merge requires coalesce(1)** — merge operations from multiple executors cause DuckLake transaction conflicts. Should either enforce single-partition writes automatically or implement retry with backoff.
-- **No abort rollback** — partial writes from successful executors can't be rolled back on abort. Should track pre-batch snapshot and restore on failure.
+- **Merge requires partitioning strategy** — concurrent merge operations from multiple executors on overlapping keys cause DuckLake transaction conflicts. Use `.coalesce(1)` or `.repartition(N, "merge_key")` to avoid conflicts. This is inherent to row-level SQL merge and matches the JDBC connector pattern. Append writes are unaffected — DuckLake automatically resolves concurrent appends.
+- **No abort rollback for merge writes** — merge writes execute directly on executors and can't be rolled back on abort. Append/overwrite writes use atomic file registration and are safe.
 - **No partition-level overwrite** — overwrite deletes the entire table. Should support `replaceWhere` for partition-scoped overwrites.
 - **No schema validation** — mismatches between DataFrame and DuckLake table schemas fail with raw DuckDB errors at the executor level.
-- **No idempotent writes** — stream writer doesn't use `batchId` for deduplication. Retried micro-batches produce duplicates.
+- **No idempotent writes for merge/streaming** — batch append/overwrite writes are idempotent (atomic file registration). Merge writes and streaming writes don't use `batchId` for deduplication; retried micro-batches may produce duplicates.
 - **No delete support** — no way to delete rows from Spark.
 
 ### Both

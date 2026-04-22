@@ -259,6 +259,39 @@ def test_batched_merge_across_multiple_batches(spark):
     assert len(rows) == 20
 
 
+# Parquet write path (append/overwrite via ducklake_add_data_files)
+
+
+def test_parquet_write_with_max_records_per_file(spark, ducklake_config):
+    """Writing more rows than maxRecordsPerFile produces multiple files, all registered."""
+    data = [(i, f"user_{i}") for i in range(100)]
+    new_data = spark.createDataFrame(data, ["id", "name"])
+    _write_df(new_data, extra_opts={"maxRecordsPerFile": "25"}, mode="overwrite")
+
+    df = _read_df(spark)
+    assert df.count() == 100
+
+    conn = ducklake_config.connect()
+    try:
+        file_count = conn.execute(
+            "SELECT file_count FROM ducklake_table_info('my_lake') "
+            "WHERE table_name = 'test_table'"
+        ).fetchone()[0]
+    finally:
+        conn.close()
+    assert file_count >= 4
+
+
+def test_parquet_append_with_multiple_partitions(spark):
+    """Parallel append from multiple partitions succeeds without conflicts."""
+    data = [(i, f"user_{i}") for i in range(3, 23)]
+    new_data = spark.createDataFrame(data, ["id", "name"]).repartition(4)
+    _write_df(new_data)
+
+    df = _read_df(spark)
+    assert df.count() == 22
+
+
 # Stream read
 
 

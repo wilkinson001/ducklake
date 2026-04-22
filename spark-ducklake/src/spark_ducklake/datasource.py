@@ -1,8 +1,11 @@
+import uuid
+
 from pyspark.sql.datasource import (
     DataSource,
     DataSourceReader,
     DataSourceStreamReader,
     DataSourceStreamWriter,
+    DataSourceWriter,
 )
 from pyspark.sql.types import (
     BooleanType,
@@ -23,6 +26,7 @@ from pyspark.sql.types import (
 from spark_ducklake.connection import DuckLakeConfig, parse_table_name, quote_identifier
 from spark_ducklake.pool import get_connection
 from spark_ducklake.reader import DuckLakeReader, DuckLakeStreamReader
+from spark_ducklake.parquet_writer import DuckLakeParquetWriter
 from spark_ducklake.writer import DuckLakeWriter, DuckLakeStreamWriter
 
 
@@ -75,19 +79,44 @@ class DuckLakeDataSource(DataSource):
         num_partitions = int(self.options.get("numPartitions", "1"))
         return DuckLakeReader(config, dl_schema, table, columns, num_partitions)
 
-    def writer(self, schema: StructType, overwrite: bool) -> DuckLakeWriter:
+    def writer(self, schema: StructType, overwrite: bool) -> DataSourceWriter:
         config = DuckLakeConfig.from_options(self.options)
         dl_schema, table = parse_table_name(self.options["table"])
-        if overwrite:
-            conn = get_connection(config)
-            conn.execute(
-                f"DELETE FROM my_lake.{quote_identifier(dl_schema)}.{quote_identifier(table)}"
-            )
         write_mode = self.options.get("writeMode", "append")
-        merge_keys = self.options.get("mergeKeys", "")
-        batch_size = int(self.options.get("writeBatchSize", "10000"))
-        return DuckLakeWriter(
-            config, dl_schema, table, schema, write_mode, merge_keys, batch_size
+
+        if write_mode == "merge":
+            merge_keys = self.options.get("mergeKeys", "")
+            batch_size = int(self.options.get("writeBatchSize", "10000"))
+            if overwrite:
+                conn = get_connection(config)
+                conn.execute(
+                    f"DELETE FROM my_lake.{quote_identifier(dl_schema)}.{quote_identifier(table)}"
+                )
+            return DuckLakeWriter(
+                config, dl_schema, table, schema, write_mode, merge_keys, batch_size
+            )
+
+        conn = get_connection(config)
+        settings = conn.execute(
+            "SELECT data_path FROM ducklake_settings('my_lake')"
+        ).fetchone()
+        data_path = settings[0]
+
+        # Use the DuckLake table schema (not the DataFrame schema) for Parquet
+        # type mapping — ducklake_add_data_files requires exact type matches.
+        table_schema = self.schema()
+
+        job_id = str(uuid.uuid4())
+        max_records = int(self.options.get("maxRecordsPerFile", "1000000"))
+        return DuckLakeParquetWriter(
+            config=config,
+            dl_schema=dl_schema,
+            table=table,
+            spark_schema=table_schema,
+            data_path=data_path,
+            job_id=job_id,
+            overwrite=overwrite,
+            max_records_per_file=max_records,
         )
 
     def streamReader(self, schema: StructType) -> DataSourceStreamReader:
