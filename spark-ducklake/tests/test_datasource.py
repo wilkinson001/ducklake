@@ -25,8 +25,17 @@ def test_basic_type_mapping():
 
 
 def test_decimal_type_mapping():
-    assert isinstance(duckdb_type_to_spark("DECIMAL(10,2)"), DecimalType)
-    assert isinstance(duckdb_type_to_spark("DECIMAL"), DecimalType)
+    result = duckdb_type_to_spark("DECIMAL(10,2)")
+    assert isinstance(result, DecimalType)
+    assert result.precision == 10
+    assert result.scale == 2
+
+
+def test_decimal_type_without_params():
+    result = duckdb_type_to_spark("DECIMAL")
+    assert isinstance(result, DecimalType)
+    assert result.precision == 10  # PySpark default
+    assert result.scale == 0  # PySpark default
 
 
 def test_unknown_type_defaults_to_string():

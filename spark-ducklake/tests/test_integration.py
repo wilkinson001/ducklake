@@ -85,9 +85,9 @@ def test_reads_all_rows(spark):
 
 def test_schema_inference(spark):
     df = _read_df(spark)
-    field_names = [f.name for f in df.schema.fields]
-    assert "id" in field_names
-    assert "name" in field_names
+    fields = {f.name: type(f.dataType).__name__ for f in df.schema.fields}
+    assert fields["id"] == "IntegerType"
+    assert fields["name"] == "StringType"
 
 
 # Batch write
@@ -97,8 +97,10 @@ def test_append_inserts_new_rows(spark):
     new_data = spark.createDataFrame([(3, "charlie"), (4, "diana")], ["id", "name"])
     _write_df(new_data)
 
-    df = _read_df(spark)
-    assert df.count() == 4
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert len(rows) == 4
+    assert rows[3] == "charlie"
+    assert rows[4] == "diana"
 
 
 def test_append_preserves_existing_rows(spark):
@@ -187,13 +189,16 @@ def test_read_with_multiple_partitions(spark):
 
 
 def test_read_with_more_partitions_than_rows(spark):
-    """numPartitions > row count still returns all rows."""
+    """numPartitions > row count still returns all rows with correct data."""
     reader = spark.read.format("ducklake")
     for k, v in DUCKLAKE_OPTS.items():
         reader = reader.option(k, v)
     df = reader.option("numPartitions", "10").load()
 
-    assert df.count() == 2
+    rows = df.orderBy("id").collect()
+    assert len(rows) == 2
+    assert rows[0]["id"] == 1
+    assert rows[1]["id"] == 2
 
 
 def test_partitioned_read_with_column_projection(spark):
@@ -230,7 +235,7 @@ def test_select_reordered_columns(spark):
 
 
 def test_batched_write_inserts_all_rows(spark):
-    """Writing more rows than writeBatchSize still inserts everything."""
+    """Writing more rows than writeBatchSize still inserts everything with correct data."""
     data = [(i, f"user_{i}") for i in range(100)]
     new_data = spark.createDataFrame(data, ["id", "name"])
 
@@ -239,8 +244,10 @@ def test_batched_write_inserts_all_rows(spark):
         writer = writer.option(k, v)
     writer.option("writeBatchSize", "10").save()
 
-    df = _read_df(spark)
-    assert df.count() == 100
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert len(rows) == 100
+    assert rows[0] == "user_0"
+    assert rows[99] == "user_99"
 
 
 def test_batched_merge_across_multiple_batches(spark):
@@ -288,8 +295,11 @@ def test_parquet_append_with_multiple_partitions(spark):
     new_data = spark.createDataFrame(data, ["id", "name"]).repartition(4)
     _write_df(new_data)
 
-    df = _read_df(spark)
-    assert df.count() == 22
+    rows = {r["id"]: r["name"] for r in _read_df(spark).collect()}
+    assert len(rows) == 22
+    assert rows[1] == "alice"
+    assert rows[3] == "user_3"
+    assert rows[22] == "user_22"
 
 
 # Stream read
@@ -327,6 +337,8 @@ def test_stream_read_picks_up_insertions(spark):
     q.awaitTermination(timeout=30)
     assert q.exception() is None
     assert len(results) == 2
+    names = sorted(r["name"] for r in results)
+    assert names == ["alice", "bob"]
 
 
 def test_stream_read_starting_version(spark, ducklake_config):
@@ -421,10 +433,14 @@ def test_stream_write_appends_rows(spark, ducklake_config):
 
     conn = ducklake_config.connect()
     try:
-        count = conn.execute("SELECT COUNT(*) FROM my_lake.test_table").fetchone()[0]
+        rows = conn.execute(
+            "SELECT id, name FROM my_lake.test_table ORDER BY id"
+        ).fetchall()
     finally:
         conn.close()
-    assert count == 4
+    assert len(rows) == 4
+    assert rows[2] == (3, "charlie")
+    assert rows[3] == (4, "diana")
 
 
 # Custom schema

@@ -16,6 +16,9 @@ def test_config_from_options():
     config = DuckLakeConfig.from_options(options)
     assert config.postgres_conn == options["postgres_conn"]
     assert config.s3_endpoint == "minio:9000"
+    assert config.s3_access_key == "minioadmin"
+    assert config.s3_secret_key == "minioadmin"
+    assert config.s3_bucket == "ducklake"
     assert config.s3_use_ssl is False
 
 
@@ -29,6 +32,11 @@ def test_config_from_options_with_ssl():
         "s3_use_ssl": "true",
     }
     config = DuckLakeConfig.from_options(options)
+    assert config.postgres_conn == "dbname=test"
+    assert config.s3_endpoint == "s3.amazonaws.com"
+    assert config.s3_access_key == "key"
+    assert config.s3_secret_key == "secret"
+    assert config.s3_bucket == "bucket"
     assert config.s3_use_ssl is True
 
 

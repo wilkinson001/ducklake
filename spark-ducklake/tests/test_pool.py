@@ -4,7 +4,7 @@ from unittest.mock import patch, MagicMock
 import duckdb
 
 from spark_ducklake.connection import DuckLakeConfig
-from spark_ducklake.pool import _get_cache, close_connections, get_connection
+from spark_ducklake.pool import close_connections, get_connection
 
 
 CONFIG = DuckLakeConfig(
@@ -81,10 +81,8 @@ def test_connections_are_isolated_across_threads(mock_connect):
     close_connections()
 
 
-@patch.object(DuckLakeConfig, "connect", side_effect=lambda: duckdb.connect())
+@patch.object(DuckLakeConfig, "connect", side_effect=lambda: MagicMock())
 def test_close_connections_calls_close_on_cached_connections(mock_connect):
-    mock_conn = MagicMock()
-    cache = _get_cache()
-    cache[("key",)] = mock_conn
+    conn = get_connection(CONFIG)
     close_connections()
-    mock_conn.close.assert_called_once()
+    conn.close.assert_called_once()

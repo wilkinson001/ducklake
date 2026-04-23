@@ -62,6 +62,11 @@ def test_parquet_writer_without_credentials_is_picklable():
     assert restored.config.s3_access_key is None
     assert restored.config.s3_secret_key is None
     assert restored.config.s3_endpoint is None
+    assert restored.dl_schema == "main"
+    assert restored.table == "test_table"
+    assert restored.spark_schema == SPARK_SCHEMA
+    assert restored.data_path == "s3://bucket/"
+    assert restored.job_id == "test-job-id"
 
 
 # Type mapping tests
@@ -129,7 +134,7 @@ def test_commit_message_default_empty_files():
 
 def test_commit_message_with_multiple_files():
     msg = DuckLakeCommitMessage(files=["a.parquet", "b.parquet", "c.parquet"])
-    assert len(msg.files) == 3
+    assert msg.files == ["a.parquet", "b.parquet", "c.parquet"]
 
 
 # DuckLakeParquetWriter tests
@@ -145,6 +150,8 @@ def test_parquet_writer_is_picklable():
         job_id="test-job-id",
     )
     restored = pickle.loads(pickle.dumps(w))
+    assert restored.config == CONFIG
+    assert restored.spark_schema == SPARK_SCHEMA
     assert restored.dl_schema == "main"
     assert restored.table == "test_table"
     assert restored.data_path == "s3://bucket/"
@@ -164,7 +171,12 @@ def test_parquet_writer_overwrite_is_picklable():
         overwrite=True,
     )
     restored = pickle.loads(pickle.dumps(w))
+    assert restored.config == CONFIG
+    assert restored.dl_schema == "main"
+    assert restored.table == "test_table"
+    assert restored.spark_schema == SPARK_SCHEMA
     assert restored.overwrite is True
+    assert restored.max_records_per_file == 1_000_000
 
 
 def test_parquet_writer_custom_max_records_is_picklable():
@@ -178,6 +190,11 @@ def test_parquet_writer_custom_max_records_is_picklable():
         max_records_per_file=500,
     )
     restored = pickle.loads(pickle.dumps(w))
+    assert restored.config == CONFIG
+    assert restored.dl_schema == "main"
+    assert restored.table == "test_table"
+    assert restored.spark_schema == SPARK_SCHEMA
+    assert restored.overwrite is False
     assert restored.max_records_per_file == 500
 
 

@@ -50,6 +50,11 @@ def duckdb_type_to_spark(duckdb_type: str) -> DataType:
     if upper in DUCKDB_TO_SPARK_TYPES:
         return DUCKDB_TO_SPARK_TYPES[upper]
     if upper.startswith("DECIMAL"):
+        import re
+
+        match = re.match(r"DECIMAL\((\d+),\s*(\d+)\)", upper)
+        if match:
+            return DecimalType(int(match.group(1)), int(match.group(2)))
         return DecimalType()
     return StringType()
 
