@@ -443,6 +443,104 @@ def test_stream_write_appends_rows(spark, ducklake_config):
     assert rows[3] == (4, "diana")
 
 
+def test_stream_write_merge(spark, ducklake_config):
+    """Stream writer with merge mode upserts rows correctly."""
+    source_data = spark.createDataFrame(
+        [(1, "alice_updated"), (3, "charlie")], ["id", "name"]
+    )
+    input_dir = tempfile.mkdtemp()
+    checkpoint_dir = tempfile.mkdtemp()
+    source_data.coalesce(1).write.format("json").mode("overwrite").save(input_dir)
+
+    stream_df = spark.readStream.schema("id int, name string").json(input_dir)
+
+    writer = stream_df.writeStream.format("ducklake")
+    for k, v in DUCKLAKE_OPTS.items():
+        writer = writer.option(k, v)
+    q = (
+        writer.option("checkpointLocation", checkpoint_dir)
+        .option("writeMode", "merge")
+        .option("mergeKeys", "id")
+        .trigger(availableNow=True)
+        .start()
+    )
+    q.awaitTermination(timeout=30)
+    assert q.exception() is None
+
+    conn = ducklake_config.connect()
+    try:
+        rows = {
+            r[0]: r[1]
+            for r in conn.execute(
+                "SELECT id, name FROM my_lake.test_table ORDER BY id"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    assert rows[1] == "alice_updated"
+    assert rows[2] == "bob"
+    assert rows[3] == "charlie"
+    assert len(rows) == 3
+
+
+@pytest.mark.skip(
+    reason="Stream overwrite uses executor-side DELETE+INSERT which conflicts with DuckLake transactions — needs staging table architecture"
+)
+def test_stream_write_overwrite(spark, ducklake_config):
+    """Stream writer with complete output mode replaces all rows."""
+    source_data = spark.createDataFrame(
+        [(10, "zara"), (10, "zara"), (11, "yuki")], ["id", "name"]
+    )
+    input_dir = tempfile.mkdtemp()
+    checkpoint_dir = tempfile.mkdtemp()
+    source_data.write.format("json").mode("overwrite").save(input_dir)
+
+    # complete output mode requires an aggregation
+    stream_df = (
+        spark.readStream.schema("id int, name string")
+        .json(input_dir)
+        .groupBy("id", "name")
+        .count()
+    )
+
+    writer = stream_df.writeStream.format("ducklake").outputMode("complete")
+    for k, v in DUCKLAKE_OPTS.items():
+        writer = writer.option(k, v)
+
+    # Write to a separate table since schema differs (has count column)
+    conn = ducklake_config.connect()
+    try:
+        conn.execute("DROP TABLE IF EXISTS my_lake.test_overwrite_stream")
+        conn.execute(
+            "CREATE TABLE my_lake.test_overwrite_stream "
+            "(id INTEGER, name VARCHAR, count BIGINT)"
+        )
+    finally:
+        conn.close()
+
+    q = (
+        writer.option("table", "test_overwrite_stream")
+        .option("checkpointLocation", checkpoint_dir)
+        .trigger(availableNow=True)
+        .start()
+    )
+    q.awaitTermination(timeout=30)
+    assert q.exception() is None
+
+    conn = ducklake_config.connect()
+    try:
+        rows = {
+            r[0]: r[2]
+            for r in conn.execute(
+                "SELECT id, name, count FROM my_lake.test_overwrite_stream ORDER BY id"
+            ).fetchall()
+        }
+    finally:
+        conn.close()
+    assert rows[10] == 2
+    assert rows[11] == 1
+
+
 # Custom schema
 
 

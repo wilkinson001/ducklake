@@ -1,5 +1,6 @@
 import logging
 import pickle
+from unittest.mock import MagicMock, patch
 
 import pyarrow as pa
 import pytest
@@ -260,3 +261,205 @@ def test_parquet_writer_abort_with_none_messages(caplog):
     with caplog.at_level(logging.WARNING):
         w.abort([None, None])
     assert "orphaned" not in caplog.text
+
+
+# commit() tests
+
+
+@patch("spark_ducklake.parquet_writer.get_connection")
+def test_commit_registers_files_in_transaction(mock_get_conn):
+    conn = MagicMock()
+    mock_get_conn.return_value = conn
+
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+        overwrite=False,
+    )
+
+    w.commit(
+        [
+            DuckLakeCommitMessage(
+                files=["s3://bucket/f1.parquet", "s3://bucket/f2.parquet"]
+            )
+        ]
+    )
+
+    calls = [c.args[0] for c in conn.execute.call_args_list]
+    assert calls[0] == "BEGIN TRANSACTION"
+    assert "ducklake_add_data_files" in calls[1]
+    assert "s3://bucket/f1.parquet" in calls[1]
+    assert "s3://bucket/f2.parquet" in calls[1]
+    assert calls[2] == "COMMIT"
+    assert not any("DELETE FROM" in c for c in calls)
+
+
+@patch("spark_ducklake.parquet_writer.get_connection")
+def test_commit_overwrite_deletes_before_registering(mock_get_conn):
+    conn = MagicMock()
+    mock_get_conn.return_value = conn
+
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+        overwrite=True,
+    )
+
+    w.commit([DuckLakeCommitMessage(files=["s3://bucket/f1.parquet"])])
+
+    calls = [c.args[0] for c in conn.execute.call_args_list]
+    assert calls[0] == "BEGIN TRANSACTION"
+    assert "DELETE FROM" in calls[1]
+    assert "ducklake_add_data_files" in calls[2]
+    assert calls[3] == "COMMIT"
+
+
+@patch("spark_ducklake.parquet_writer.get_connection")
+def test_commit_overwrite_with_no_files_still_deletes(mock_get_conn):
+    conn = MagicMock()
+    mock_get_conn.return_value = conn
+
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+        overwrite=True,
+    )
+
+    w.commit([])
+
+    calls = [c.args[0] for c in conn.execute.call_args_list]
+    assert any("DELETE FROM" in c for c in calls)
+    assert not any("ducklake_add_data_files" in c for c in calls)
+
+
+@patch("spark_ducklake.parquet_writer.get_connection")
+def test_commit_rollback_on_error(mock_get_conn):
+    conn = MagicMock()
+
+    def execute_side_effect(sql):
+        if "ducklake_add_data_files" in sql:
+            raise RuntimeError("simulated failure")
+
+    conn.execute.side_effect = execute_side_effect
+    mock_get_conn.return_value = conn
+
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+        overwrite=False,
+    )
+
+    with pytest.raises(RuntimeError, match="simulated failure"):
+        w.commit([DuckLakeCommitMessage(files=["s3://bucket/f1.parquet"])])
+
+    calls = [c.args[0] for c in conn.execute.call_args_list]
+    assert "ROLLBACK" in calls
+
+
+@patch("spark_ducklake.parquet_writer.get_connection")
+def test_commit_skips_none_messages(mock_get_conn):
+    conn = MagicMock()
+    mock_get_conn.return_value = conn
+
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+        overwrite=False,
+    )
+
+    w.commit([None, DuckLakeCommitMessage(files=["s3://bucket/f1.parquet"]), None])
+
+    calls = [c.args[0] for c in conn.execute.call_args_list]
+    add_call = [c for c in calls if "ducklake_add_data_files" in c]
+    assert len(add_call) == 1
+    assert "s3://bucket/f1.parquet" in add_call[0]
+
+
+# abort() tests
+
+
+def test_abort_deletes_files_from_s3():
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+    )
+
+    fs = MagicMock()
+    with patch.object(w, "_build_s3_filesystem", return_value=fs):
+        w.abort(
+            [
+                DuckLakeCommitMessage(
+                    files=["s3://bucket/f1.parquet", "s3://bucket/f2.parquet"]
+                )
+            ]
+        )
+
+    assert fs.delete_file.call_count == 2
+    fs.delete_file.assert_any_call("bucket/f1.parquet")
+    fs.delete_file.assert_any_call("bucket/f2.parquet")
+
+
+def test_abort_continues_on_per_file_failure():
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+    )
+
+    fs = MagicMock()
+    fs.delete_file.side_effect = [Exception("delete failed"), None]
+
+    with patch.object(w, "_build_s3_filesystem", return_value=fs):
+        w.abort(
+            [
+                DuckLakeCommitMessage(
+                    files=["s3://bucket/f1.parquet", "s3://bucket/f2.parquet"]
+                )
+            ]
+        )
+
+    assert fs.delete_file.call_count == 2
+
+
+def test_abort_handles_s3_connection_failure():
+    w = DuckLakeParquetWriter(
+        config=CONFIG,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+    )
+
+    with patch.object(
+        w, "_build_s3_filesystem", side_effect=Exception("s3 connection failed")
+    ):
+        # Should not raise — the method catches and logs
+        w.abort([DuckLakeCommitMessage(files=["s3://bucket/f1.parquet"])])
