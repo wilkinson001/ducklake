@@ -89,12 +89,14 @@ class DuckLakeParquetWriter(DataSourceWriter):
         )
 
     def _build_s3_filesystem(self) -> pafs.S3FileSystem:
-        return pafs.S3FileSystem(
-            access_key=self.config.s3_access_key,
-            secret_key=self.config.s3_secret_key,
-            endpoint_override=self.config.s3_endpoint,
-            scheme="https" if self.config.s3_use_ssl else "http",
-        )
+        kwargs = {}
+        if self.config.s3_access_key and self.config.s3_secret_key:
+            kwargs["access_key"] = self.config.s3_access_key
+            kwargs["secret_key"] = self.config.s3_secret_key
+        if self.config.s3_endpoint:
+            kwargs["endpoint_override"] = self.config.s3_endpoint
+        kwargs["scheme"] = "https" if self.config.s3_use_ssl else "http"
+        return pafs.S3FileSystem(**kwargs)
 
     def _file_prefix(self) -> str:
         prefix = self.data_path

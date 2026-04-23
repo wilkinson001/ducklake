@@ -34,9 +34,9 @@ df.show()
 |--------|----------|-------------|
 | `table` | Yes | DuckLake table name, optionally prefixed with schema (e.g. `"my_table"` or `"custom_schema.my_table"`) |
 | `postgres_conn` | Yes | PostgreSQL connection string for DuckLake metadata catalog |
-| `s3_endpoint` | Yes | S3-compatible endpoint (e.g. `minio:9000`) |
-| `s3_access_key` | Yes | S3 access key |
-| `s3_secret_key` | Yes | S3 secret key |
+| `s3_endpoint` | No | S3-compatible endpoint (e.g. `minio:9000`). Omit for AWS S3. |
+| `s3_access_key` | No | S3 access key. Omit to use IAM roles, instance profiles, or environment variables. |
+| `s3_secret_key` | No | S3 secret key. Omit to use IAM roles, instance profiles, or environment variables. |
 | `s3_bucket` | Yes | S3 bucket for DuckLake data |
 | `s3_use_ssl` | No | `"true"` or `"false"` (default: `"false"`) |
 | `readChangeFeed` | No | `"true"` to enable CDC stream reads (default: `"false"`) |
@@ -229,4 +229,4 @@ DuckLake uses optimistic concurrency with automatic retry for non-conflicting op
 ### Both
 
 - **No Spark metrics** — no custom task metrics reported (rows read/written, bytes scanned).
-- **Plaintext credentials** — S3 credentials passed as Spark options. Should support IAM roles, instance profiles, and credential providers.
+- **No custom credential providers** — S3 credentials are resolved via explicit options, environment variables, config files, or IAM roles. Custom credential provider plugins (e.g., HashiCorp Vault) are not supported.

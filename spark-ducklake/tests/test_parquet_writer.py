@@ -43,6 +43,26 @@ CONFIG = DuckLakeConfig(
     s3_bucket="bucket",
 )
 
+CONFIG_NO_CREDS = DuckLakeConfig(
+    postgres_conn="dbname=test",
+    s3_bucket="bucket",
+)
+
+
+def test_parquet_writer_without_credentials_is_picklable():
+    w = DuckLakeParquetWriter(
+        config=CONFIG_NO_CREDS,
+        dl_schema="main",
+        table="test_table",
+        spark_schema=SPARK_SCHEMA,
+        data_path="s3://bucket/",
+        job_id="test-job-id",
+    )
+    restored = pickle.loads(pickle.dumps(w))
+    assert restored.config.s3_access_key is None
+    assert restored.config.s3_secret_key is None
+    assert restored.config.s3_endpoint is None
+
 
 # Type mapping tests
 
