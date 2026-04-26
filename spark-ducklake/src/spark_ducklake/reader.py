@@ -1,7 +1,24 @@
+import datetime
+
 from pyspark.sql.datasource import (
     DataSourceReader,
     DataSourceStreamReader,
     InputPartition,
+)
+
+from pyspark.sql.datasource import (
+    EqualTo,
+    GreaterThan,
+    GreaterThanOrEqual,
+    In,
+    IsNotNull,
+    IsNull,
+    LessThan,
+    LessThanOrEqual,
+    Not,
+    StringContains,
+    StringEndsWith,
+    StringStartsWith,
 )
 
 from spark_ducklake.connection import DuckLakeConfig, quote_identifier
@@ -12,6 +29,57 @@ def _column_list(columns: list[str]) -> str:
     if columns:
         return ", ".join(quote_identifier(c) for c in columns)
     return "*"
+
+
+def _format_value(value) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, (datetime.datetime, datetime.date)):
+        return f"'{value}'"
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _filter_to_sql(f) -> str | None:
+    def _col_val(col_name, op, val):
+        return f"{quote_identifier(col_name)} {op} {_format_value(val)}"
+
+    def _col_like(col_name, pattern):
+        escaped = str(pattern).replace("'", "''")
+        return f"{quote_identifier(col_name)} LIKE '{escaped}'"
+
+    match f:
+        case Not(child=child):
+            inner = _filter_to_sql(child)
+            return f"NOT ({inner})" if inner is not None else None
+        case IsNull(attribute=(col,)):
+            return f"{quote_identifier(col)} IS NULL"
+        case IsNotNull(attribute=(col,)):
+            return f"{quote_identifier(col)} IS NOT NULL"
+        case EqualTo(attribute=(col,), value=val):
+            return _col_val(col, "=", val)
+        case GreaterThan(attribute=(col,), value=val):
+            return _col_val(col, ">", val)
+        case GreaterThanOrEqual(attribute=(col,), value=val):
+            return _col_val(col, ">=", val)
+        case LessThan(attribute=(col,), value=val):
+            return _col_val(col, "<", val)
+        case LessThanOrEqual(attribute=(col,), value=val):
+            return _col_val(col, "<=", val)
+        case In(attribute=(col,), value=vals):
+            formatted = ", ".join(_format_value(v) for v in vals)
+            return f"{quote_identifier(col)} IN ({formatted})"
+        case StringStartsWith(attribute=(col,), value=val):
+            return _col_like(col, f"{val}%")
+        case StringEndsWith(attribute=(col,), value=val):
+            return _col_like(col, f"%{val}")
+        case StringContains(attribute=(col,), value=val):
+            return _col_like(col, f"%{val}%")
+        case _:
+            return None
 
 
 class DuckLakePartition(InputPartition):
@@ -40,11 +108,26 @@ class DuckLakeReader(DataSourceReader):
         self.table = table
         self.columns = columns
         self.num_partitions = num_partitions
+        self._where_clause = ""
+
+    def pushFilters(self, filters):
+        pushed_sql = []
+        unpushed = []
+        for f in filters:
+            sql = _filter_to_sql(f)
+            if sql is not None:
+                pushed_sql.append(sql)
+            else:
+                unpushed.append(f)
+        if pushed_sql:
+            self._where_clause = " WHERE " + " AND ".join(pushed_sql)
+        return unpushed
 
     def partitions(self):
         conn = get_connection(self.config)
         count = conn.execute(
             f"SELECT COUNT(*) FROM my_lake.{quote_identifier(self.schema)}.{quote_identifier(self.table)}"
+            f"{self._where_clause}"
         ).fetchone()[0]
 
         if self.num_partitions <= 1 or count == 0:
@@ -62,6 +145,7 @@ class DuckLakeReader(DataSourceReader):
         cols = _column_list(self.columns)
         result = conn.execute(
             f"SELECT {cols} FROM my_lake.{quote_identifier(self.schema)}.{quote_identifier(self.table)}"
+            f"{self._where_clause}"
             f" LIMIT {partition.limit} OFFSET {partition.offset}"
         ).fetchall()
         yield from result

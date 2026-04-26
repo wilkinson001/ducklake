@@ -339,7 +339,7 @@ dev = [
 requires-dist = [
     { name = "duckdb", specifier = ">=1.5.2" },
     { name = "pyarrow", specifier = ">=23.0.1" },
-    { name = "pyspark", specifier = ">=4.0" },
+    { name = "pyspark", specifier = ">=4.1" },
 ]
 
 [package.metadata.requires-dev]

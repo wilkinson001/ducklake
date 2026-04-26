@@ -65,6 +65,21 @@ Supports column projection — Spark will push selected columns down to DuckDB:
 df.select("id", "name").show()  # only reads id and name columns
 ```
 
+Supports predicate pushdown when enabled — filters are pushed to DuckDB to reduce data scanned:
+
+```python
+spark.conf.set("spark.sql.python.filterPushdown.enabled", "true")
+
+df = spark.read.format("ducklake") \
+    .option("table", "my_table") \
+    .option(...) \
+    .load()
+
+df.filter("id > 100").filter("name IS NOT NULL").show()  # filters pushed to DuckDB
+```
+
+Only AND-combined filters are pushed. OR predicates (e.g., `id = 1 OR name = 'alice'`) are applied by Spark after reading. See the [PySpark filter pushdown documentation](https://spark.apache.org/docs/4.1.0/api/python/reference/pyspark.sql/api/pyspark.sql.datasource.DataSourceReader.pushFilters.html) for details.
+
 ### Batch Write (append)
 
 ```python
@@ -213,7 +228,7 @@ DuckLake uses optimistic concurrency with automatic retry for non-conflicting op
 
 ### Readers
 
-- **No predicate pushdown** — PySpark's Python DataSource V2 API does not support filter pushdown. All filters are applied by Spark after reading. This is a platform limitation, not a connector limitation.
+- **Predicate pushdown limited to AND-combined filters** — filter pushdown is supported for batch reads (requires `spark.sql.python.filterPushdown.enabled=true`). Supported filters: `=`, `>`, `>=`, `<`, `<=`, `IS NULL`, `IS NOT NULL`, `IN`, `LIKE` (starts with, ends with, contains), `NOT`. OR predicates are not pushed down — Spark applies them post-read. See [PySpark Filter Pushdown API](https://spark.apache.org/docs/4.1.0/api/python/reference/pyspark.sql/api/pyspark.sql.datasource.DataSourceReader.pushFilters.html).
 - **No column projection in CDC mode** — CDC stream reads use `SELECT *` because the change feed includes metadata columns. This matches Delta Lake's change feed behavior. Users can `.drop()` unwanted columns after reading.
 - **No schema evolution handling** — if the DuckLake table schema changes between snapshots, the stream reader doesn't adapt.
 

@@ -29,6 +29,7 @@ def spark():
     session = (
         SparkSession.builder.master("local[2]")
         .appName("spark-ducklake-tests")
+        .config("spark.sql.python.filterPushdown.enabled", "true")
         .getOrCreate()
     )
     session.dataSource.register(DuckLakeDataSource)
@@ -229,6 +230,41 @@ def test_select_reordered_columns(spark):
     rows = df.orderBy("id").collect()
     assert rows[0]["name"] == "alice"
     assert rows[0]["id"] == 1
+
+
+# Predicate pushdown
+
+
+def test_filter_pushdown_equality(spark):
+    """Filter on id = 1 returns only alice."""
+    df = _read_df(spark).filter("id = 1")
+    rows = df.collect()
+    assert len(rows) == 1
+    assert rows[0]["name"] == "alice"
+
+
+def test_filter_pushdown_greater_than(spark):
+    """Filter on id > 1 returns only bob."""
+    df = _read_df(spark).filter("id > 1")
+    rows = df.collect()
+    assert len(rows) == 1
+    assert rows[0]["name"] == "bob"
+
+
+def test_filter_pushdown_string_equality(spark):
+    """Filter on name = 'alice' returns correct row."""
+    df = _read_df(spark).filter("name = 'alice'")
+    rows = df.collect()
+    assert len(rows) == 1
+    assert rows[0]["id"] == 1
+
+
+def test_filter_pushdown_combined(spark):
+    """Multiple filters are AND-combined."""
+    df = _read_df(spark).filter("id >= 1").filter("id <= 1")
+    rows = df.collect()
+    assert len(rows) == 1
+    assert rows[0]["name"] == "alice"
 
 
 # Write batching

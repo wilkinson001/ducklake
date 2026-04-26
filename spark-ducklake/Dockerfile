@@ -1,4 +1,4 @@
-FROM apache/spark:4.0.2-python3 AS base
+FROM apache/spark:4.1.1-python3 AS base
 
 USER root
 
